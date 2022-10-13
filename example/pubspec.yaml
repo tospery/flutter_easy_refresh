@@ -1,6 +1,6 @@
 name: example
 description: EasyRefresh example.
-
+publish_to: 'none'
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
 # followed by an optional build number separated by a +.
@@ -77,4 +77,4 @@ flutter:
   # see https://flutter.io/custom-fonts/#from-packages
   assets:
     - assets/image/
-    - assets/flare/
+    - assets/rive/
