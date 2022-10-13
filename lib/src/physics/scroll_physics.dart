@@ -1,178 +1,92 @@
-part of easy_refresh;
+import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/widgets.dart';
+import 'dart:math' as math;
 
-/// The multiple applied to overscroll to make it appear that scrolling past
-/// the edge of the scrollable contents is harder than scrolling the list.
-/// This is done by reducing the ratio of the scroll effect output vs the
-/// scroll gesture input.
-typedef FrictionFactor = double Function(double overscrollFraction);
+import '../../easy_refresh.dart';
 
-/// EasyRefresh scroll physics.
-class _ERScrollPhysics extends BouncingScrollPhysics {
-  _ERScrollPhysics({
-    ScrollPhysics? parent = const AlwaysScrollableScrollPhysics(),
-    required this.userOffsetNotifier,
-    required this.headerNotifier,
-    required this.footerNotifier,
-    SpringDescription? spring,
-    FrictionFactor? frictionFactor,
-  })  : _spring = spring,
-        _frictionFactor = frictionFactor,
-        super(parent: parent) {
-    headerNotifier._bindPhysics(this);
-    footerNotifier._bindPhysics(this);
-  }
+/// EasyRefresh滚动形式
+/// Scroll physics for environments that allow the scroll offset to go beyond
+/// the bounds of the content, but then bounce the content back to the edge of
+/// those bounds.
+///
+/// This is the behavior typically seen on iOS.
+///
+/// See also:
+///
+///  * [ScrollConfiguration], which uses this to provide the default
+///    scroll behavior on iOS.
+///  * [ClampingScrollPhysics], which is the analogous physics for Android's
+///    clamping behavior.
+class EasyRefreshPhysics extends ScrollPhysics {
+  /// 任务状态
+  final ValueNotifier<TaskState> taskNotifier;
+
+  // 回弹设置
+  final ValueNotifier<BouncingSettings> bouncingNotifier;
+
+  // 列表未占满时多余长度
+  final ValueNotifier<double> extraExtentNotifier;
+
+  /// Creates scroll physics that bounce back from the edge.
+  const EasyRefreshPhysics({
+    ScrollPhysics? parent,
+    required this.taskNotifier,
+    required this.bouncingNotifier,
+    required this.extraExtentNotifier,
+  }) : super(parent: parent);
 
   @override
-  _ERScrollPhysics applyTo(ScrollPhysics? ancestor) {
-    return _ERScrollPhysics(
+  EasyRefreshPhysics applyTo(ScrollPhysics? ancestor) {
+    return EasyRefreshPhysics(
       parent: buildParent(ancestor),
-      userOffsetNotifier: userOffsetNotifier,
-      headerNotifier: headerNotifier,
-      footerNotifier: footerNotifier,
-      spring: _spring,
-      frictionFactor: _frictionFactor,
+      taskNotifier: taskNotifier,
+      bouncingNotifier: bouncingNotifier,
+      extraExtentNotifier: extraExtentNotifier,
     );
   }
 
-  final ValueNotifier<bool> userOffsetNotifier;
-  final HeaderNotifier headerNotifier;
-  final FooterNotifier footerNotifier;
+  /// 是否允许Bottom越界(列表未占满)
+  bool get bottomOverScroll => extraExtentNotifier.value > 0.0;
 
-  /// The spring to use for ballistic simulations.
-  final SpringDescription? _spring;
-
-  /// The state of the indicator when the BallisticSimulation is created.
-  final _headerSimulationCreationState =
-      ValueNotifier<_BallisticSimulationCreationState>(
-    const _BallisticSimulationCreationState(
-      mode: IndicatorMode.inactive,
-      offset: 0,
-    ),
-  );
-  final _footerSimulationCreationState =
-      ValueNotifier<_BallisticSimulationCreationState>(
-    const _BallisticSimulationCreationState(
-      mode: IndicatorMode.inactive,
-      offset: 0,
-    ),
-  );
-
-  /// Get the current [SpringDescription] to be used.
-  @override
-  SpringDescription get spring {
-    if (headerNotifier.outOfRange) {
-      if (headerNotifier._mode == IndicatorMode.ready &&
-          headerNotifier.readySpringBuilder != null) {
-        return headerNotifier.readySpringBuilder!(
-          mode: headerNotifier._mode,
-          offset: headerNotifier._offset,
-          actualTriggerOffset: headerNotifier.actualTriggerOffset,
-          velocity: headerNotifier.velocity,
-        );
-      } else if (headerNotifier._spring != null) {
-        return headerNotifier._spring!;
-      }
-    }
-    if (footerNotifier.outOfRange) {
-      if (footerNotifier._mode == IndicatorMode.ready &&
-          footerNotifier.readySpringBuilder != null) {
-        return footerNotifier.readySpringBuilder!(
-          mode: footerNotifier._mode,
-          offset: footerNotifier._offset,
-          actualTriggerOffset: headerNotifier.actualTriggerOffset,
-          velocity: headerNotifier.velocity,
-        );
-      } else if (footerNotifier._spring != null) {
-        return footerNotifier._spring!;
-      }
-    }
-    return _spring ?? super.spring;
-  }
-
-  /// Friction factor when list is out of bounds.
-  final FrictionFactor? _frictionFactor;
+  /// The multiple applied to overscroll to make it appear that scrolling past
+  /// the edge of the scrollable contents is harder than scrolling the list.
+  /// This is done by reducing the ratio of the scroll effect output vs the
+  /// scroll gesture input.
+  ///
+  /// This factor starts at 0.52 and progressively becomes harder to overscroll
+  /// as more of the area past the edge is dragged in (represented by an increasing
+  /// `overscrollFraction` which starts at 0 when there is no overscroll).
+  double frictionFactor(double overscrollFraction) =>
+      0.52 * math.pow(1 - overscrollFraction, 2);
 
   @override
-  double frictionFactor(double overscrollFraction) {
-    FrictionFactor factor;
-    if (headerNotifier._frictionFactor != null && headerNotifier.outOfRange) {
-      factor = headerNotifier._frictionFactor!;
-    } else if (footerNotifier._frictionFactor != null &&
-        footerNotifier.outOfRange) {
-      factor = footerNotifier._frictionFactor!;
-    } else {
-      factor = _frictionFactor ?? super.frictionFactor;
-    }
-    return factor.call(overscrollFraction);
+  bool shouldAcceptUserOffset(ScrollMetrics position) {
+    // TODO: implement shouldAcceptUserOffset
+    return true;
   }
 
   @override
   double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
-    // User started scrolling.
-    userOffsetNotifier.value = true;
     assert(offset != 0.0);
     assert(position.minScrollExtent <= position.maxScrollExtent);
 
-    // Whether it is overscroll.
-    // When clamping is true,
-    // the indicator offset shall prevail.
-    if (!(position.outOfRange ||
-        (headerNotifier.clamping && headerNotifier.outOfRange) ||
-        (footerNotifier.clamping && footerNotifier.outOfRange))) {
-      return offset;
-    }
-    // Calculate the actual location.
-    double pixels = position.pixels;
-    if (headerNotifier.clamping && headerNotifier.outOfRange) {
-      pixels = position.pixels - headerNotifier._offset;
-    }
-    if (footerNotifier.clamping && footerNotifier.outOfRange) {
-      pixels = position.pixels + footerNotifier._offset;
-    }
-    double minScrollExtent = position.minScrollExtent;
-    double maxScrollExtent = position.maxScrollExtent;
+    if (!position.outOfRange) return offset;
 
-    if (headerNotifier.secondaryLocked) {
-      // Header secondary
-      pixels = headerNotifier.secondaryDimension +
-          (headerNotifier.secondaryDimension + position.pixels);
-      minScrollExtent = 0;
-      maxScrollExtent = headerNotifier.secondaryDimension;
-    }
-
-    if (footerNotifier.secondaryLocked) {
-      // Footer secondary
-      pixels = position.pixels -
-          footerNotifier.secondaryDimension -
-          position.maxScrollExtent;
-      minScrollExtent = 0;
-      maxScrollExtent = footerNotifier.secondaryDimension;
-    }
-
-    final double overscrollPastStart = math.max(minScrollExtent - pixels, 0.0);
-    final double overscrollPastEnd = math.max(pixels - maxScrollExtent, 0.0);
+    final double overscrollPastStart =
+        math.max(position.minScrollExtent - position.pixels, 0.0);
+    final double overscrollPastEnd =
+        math.max(position.pixels - position.maxScrollExtent, 0.0);
     final double overscrollPast =
         math.max(overscrollPastStart, overscrollPastEnd);
     final bool easing = (overscrollPastStart > 0.0 && offset < 0.0) ||
         (overscrollPastEnd > 0.0 && offset > 0.0);
 
-    // Scrollable viewport dimension;
-    double viewportDimension = position.viewportDimension;
-    if (position.isNestedInner) {
-      if (headerNotifier._viewportDimension != null) {
-        viewportDimension = headerNotifier._viewportDimension!;
-      } else {
-        viewportDimension = (position.axis == Axis.vertical
-                ? headerNotifier.vsync.context.size?.height
-                : headerNotifier.vsync.context.size?.width) ??
-            viewportDimension;
-      }
-    }
-
     final double friction = easing
         // Apply less resistance when easing the overscroll vs tensioning.
-        ? frictionFactor((overscrollPast - offset.abs()) / viewportDimension)
-        : frictionFactor(overscrollPast / viewportDimension);
+        ? frictionFactor(
+            (overscrollPast - offset.abs()) / position.viewportDimension)
+        : frictionFactor(overscrollPast / position.viewportDimension);
     final double direction = offset.sign;
 
     return direction * _applyFriction(overscrollPast, offset.abs(), friction);
@@ -193,310 +107,105 @@ class _ERScrollPhysics extends BouncingScrollPhysics {
 
   @override
   double applyBoundaryConditions(ScrollMetrics position, double value) {
-    if (headerNotifier._axis != position.axis ||
-        headerNotifier._axisDirection != position.axisDirection) {
-      headerNotifier._axis = position.axis;
-      headerNotifier._axisDirection = position.axisDirection;
-    }
-    if (footerNotifier._axis != position.axis ||
-        footerNotifier._axisDirection != position.axisDirection) {
-      footerNotifier._axis = position.axis;
-      footerNotifier._axisDirection = position.axisDirection;
-    }
-    // Extend of overscroll for offset.
-    double bounds = 0;
-
-    // Header
-    if (headerNotifier.clamping == true) {
+    if (!bouncingNotifier.value.top) {
+      if (value < position.pixels &&
+          position.pixels <= position.minScrollExtent) // underscroll
+        return value - position.pixels;
       if (value < position.minScrollExtent &&
-          (position.minScrollExtent < position.pixels ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  position.minScrollExtent == position.pixels))) {
-        // hit top edge
-        _updateIndicatorOffset(position, 0, value);
+          position.minScrollExtent < position.pixels) // hit top edge
         return value - position.minScrollExtent;
-      } else if (value < position.pixels &&
-          position.pixels <= position.minScrollExtent) {
-        // underscroll
-        bounds = value - position.pixels;
-      } else if (headerNotifier._offset > 0 &&
-          !(headerNotifier.modeLocked || headerNotifier.secondaryLocked)) {
-        // Header does not disappear,
-        // and the list does not shift.
-        bounds = value - position.pixels;
-      }
-    } else {
-      // hit top over
-      if (!(headerNotifier.hitOver || headerNotifier.modeLocked) &&
-          headerNotifier.mode != IndicatorMode.ready &&
-          value < position.minScrollExtent &&
-          (position.minScrollExtent < position.pixels ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  position.minScrollExtent == position.pixels))) {
-        _updateIndicatorOffset(position, 0, value);
-        return value - position.minScrollExtent;
-      }
-      // infinite hit top over
-      if ((!headerNotifier.infiniteHitOver ||
-              (!headerNotifier.hitOver && headerNotifier.modeLocked)) &&
-          (headerNotifier._canProcess || headerNotifier.noMoreLocked) &&
-          (value + headerNotifier.actualTriggerOffset) <
-              position.minScrollExtent &&
-          (position.minScrollExtent <
-                  (position.pixels + headerNotifier.actualTriggerOffset) ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  position.minScrollExtent ==
-                      (position.pixels +
-                          headerNotifier.actualTriggerOffset)))) {
-        _updateIndicatorOffset(
-            position, -headerNotifier.actualTriggerOffset, value);
-        return (value + headerNotifier.actualTriggerOffset) -
-            position.minScrollExtent;
-      }
-      // Stop spring rebound.
-      if (headerNotifier._releaseOffset > 0 &&
-          headerNotifier._mode == IndicatorMode.ready &&
-          !headerNotifier._indicator.springRebound &&
-          -value < headerNotifier.actualTriggerOffset) {
-        _updateIndicatorOffset(
-            position, -headerNotifier.actualTriggerOffset, value);
-        return headerNotifier.actualTriggerOffset +
-            value -
-            position.minScrollExtent;
-      }
-      // if (!userOffsetNotifier.value &&
-      //     (headerNotifier._mode == IndicatorMode.done ||
-      //         headerNotifier._mode == IndicatorMode.drag) &&
-      //     value > position.minScrollExtent) {
-      //   _updateIndicatorOffset(position, 0);
-      //   return value - position.minScrollExtent;
-      // }
-      // Cannot over the secondary.
-      if (headerNotifier.hasSecondary) {
-        if (value < position.pixels &&
-            position.pixels <=
-                position.minScrollExtent - headerNotifier.secondaryDimension) {
-          // underscroll secondary
-          bounds = value - position.pixels;
-        } else if (value + headerNotifier.secondaryDimension <
-                position.minScrollExtent &&
-            position.minScrollExtent <
-                position.pixels + headerNotifier.secondaryDimension) {
-          // hit top secondary
-          _updateIndicatorOffset(
-              position, -headerNotifier.secondaryDimension, value);
-          return value +
-              headerNotifier.secondaryDimension -
-              position.minScrollExtent;
-        }
-      }
     }
-
-    // Footer
-    if (footerNotifier.clamping == true) {
-      if ((position.pixels < position.maxScrollExtent ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  position.pixels == position.maxScrollExtent)) &&
-          position.maxScrollExtent < value) {
-        // hit bottom edge
-        _updateIndicatorOffset(position, position.maxScrollExtent, value);
-        return value - position.maxScrollExtent;
-      } else if (position.maxScrollExtent <= position.pixels &&
+    if (!bouncingNotifier.value.top && value - position.minScrollExtent < 0.0) {
+      // 防止越界超过header高度
+      return value - position.minScrollExtent + 0.0001;
+    }
+    if (!bouncingNotifier.value.bottom && !bottomOverScroll) {
+      if (position.maxScrollExtent <= position.pixels &&
           position.pixels < value) {
         // overscroll
-        bounds = value - position.pixels;
-      } else if (footerNotifier._offset > 0 &&
-          !(footerNotifier.modeLocked || footerNotifier.secondaryLocked)) {
-        // Footer does not disappear,
-        // and the list does not shift.
-        bounds = value - position.pixels;
+        return value - position.pixels;
       }
-    } else {
-      // hit bottom over
-      if (!(footerNotifier.hitOver || footerNotifier.modeLocked) &&
-          footerNotifier.mode != IndicatorMode.ready &&
-          (position.pixels < position.maxScrollExtent ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  position.pixels == position.maxScrollExtent)) &&
-          position.maxScrollExtent < value) {
-        _updateIndicatorOffset(position, position.maxScrollExtent, value);
+      if (position.pixels < position.maxScrollExtent &&
+          position.maxScrollExtent < value) // hit bottom edge
         return value - position.maxScrollExtent;
-      }
-      // infinite hit bottom over
-      if (!(footerNotifier.infiniteOffset != null &&
-              position.maxScrollExtent <= position.minScrollExtent) &&
-          (!footerNotifier.infiniteHitOver ||
-              !footerNotifier.hitOver && footerNotifier.modeLocked) &&
-          (footerNotifier._canProcess || footerNotifier.noMoreLocked) &&
-          ((position.pixels - footerNotifier.actualTriggerOffset) <
-                  position.maxScrollExtent ||
-              // NestedScrollView
-              (!userOffsetNotifier.value &&
-                  (position.pixels - footerNotifier.actualTriggerOffset) ==
-                      position.maxScrollExtent)) &&
-          position.maxScrollExtent <
-              (value - footerNotifier.actualTriggerOffset)) {
-        _updateIndicatorOffset(
-            position,
-            position.maxScrollExtent + footerNotifier.actualTriggerOffset,
-            value);
-        return (value - footerNotifier.actualTriggerOffset) -
-            position.maxScrollExtent;
-      }
-      // Stop spring rebound.
-      if (footerNotifier._releaseOffset > 0 &&
-          footerNotifier._mode == IndicatorMode.ready &&
-          !footerNotifier._indicator.springRebound &&
-          value <
-              position.maxScrollExtent + footerNotifier.actualTriggerOffset) {
-        _updateIndicatorOffset(
-            position,
-            position.maxScrollExtent + footerNotifier.actualTriggerOffset,
-            value);
-        return (value - footerNotifier.actualTriggerOffset) -
-            position.maxScrollExtent;
-      }
-      // if (!userOffsetNotifier.value &&
-      //     (footerNotifier._mode == IndicatorMode.done ||
-      //         footerNotifier._mode == IndicatorMode.drag) &&
-      //     value < position.maxScrollExtent) {
-      //   _updateIndicatorOffset(position, position.maxScrollExtent);
-      //   return value - position.maxScrollExtent;
-      // }
-      // Cannot over the secondary.
-      if (footerNotifier.hasSecondary) {
-        if (position.maxScrollExtent + footerNotifier.secondaryDimension <=
-                position.pixels &&
-            position.pixels < value) {
-          // overscroll
-          bounds = value - position.pixels;
-        } else if (position.pixels - footerNotifier.secondaryDimension <
-                position.maxScrollExtent &&
-            position.maxScrollExtent <
-                value - footerNotifier.secondaryDimension) {
-          // hit bottom edge
-          _updateIndicatorOffset(
-              position,
-              position.maxScrollExtent + footerNotifier.secondaryDimension,
-              value);
-          return value -
-              footerNotifier.secondaryDimension -
-              position.maxScrollExtent;
-        }
-      }
     }
-    // Update offset
-    _updateIndicatorOffset(position, value, value);
-    return bounds;
-  }
-
-  /// Update indicator offset
-  void _updateIndicatorOffset(
-      ScrollMetrics position, double offset, double value) {
-    // NestedScrollView special handling.
-    if (position.isNestedOuter &&
-        headerNotifier._offset > 0 &&
-        value > position.minScrollExtent &&
-        !headerNotifier.modeLocked) {
-      return;
+    if (!bouncingNotifier.value.bottom &&
+        value - position.maxScrollExtent > 0.0 &&
+        !bottomOverScroll) {
+      // 防止越界超过footer高度
+      return value - position.maxScrollExtent;
     }
-    final hClamping = headerNotifier.clamping && headerNotifier.offset > 0;
-    final fClamping = footerNotifier.clamping && footerNotifier.offset > 0;
-    headerNotifier._updateOffset(position, fClamping ? 0 : offset, false);
-    footerNotifier._updateOffset(position, hClamping ? 0 : offset, false);
+    return 0.0;
   }
 
   @override
   Simulation? createBallisticSimulation(
       ScrollMetrics position, double velocity) {
-    // User stopped scrolling.
-    final oldUserOffset = userOffsetNotifier.value;
-    userOffsetNotifier.value = false;
-    // Simulation update.
-    headerNotifier._updateBySimulation(position, velocity);
-    footerNotifier._updateBySimulation(position, velocity);
-    // Create simulation.
-    final hState = _BallisticSimulationCreationState(
-      mode: headerNotifier._mode,
-      offset: headerNotifier._offset,
-    );
-    final fState = _BallisticSimulationCreationState(
-      mode: footerNotifier._mode,
-      offset: footerNotifier._offset,
-    );
-    Simulation? simulation;
-    bool hSecondary = !headerNotifier.clamping &&
-        (headerNotifier._mode == IndicatorMode.secondaryReady ||
-            headerNotifier._mode == IndicatorMode.secondaryOpen);
-    bool fSecondary = !headerNotifier.clamping &&
-        (footerNotifier._mode == IndicatorMode.secondaryReady ||
-            footerNotifier._mode == IndicatorMode.secondaryOpen);
-    bool secondary = hSecondary || fSecondary;
-    if (velocity.abs() >= tolerance.velocity ||
-        (position.outOfRange || (secondary && oldUserOffset)) &&
-            (oldUserOffset ||
-                _headerSimulationCreationState.value.needCreation(hState) ||
-                _footerSimulationCreationState.value.needCreation(fState))) {
-      double mVelocity = velocity;
-      // Open secondary speed.
-      if (secondary) {
-        if (hSecondary) {
-          if (headerNotifier.offset == headerNotifier.secondaryDimension) {
-            mVelocity = 0;
-          } else if (mVelocity > -headerNotifier.secondaryVelocity) {
-            mVelocity = -headerNotifier.secondaryVelocity;
-          }
-        } else if (fSecondary) {
-          if (footerNotifier.offset == footerNotifier.secondaryDimension) {
-            mVelocity = 0;
-          } else if (mVelocity < footerNotifier.secondaryVelocity) {
-            mVelocity = footerNotifier.secondaryVelocity;
-          }
-        }
-      }
-      simulation = BouncingScrollSimulation(
+    final Tolerance tolerance = this.tolerance;
+    if (velocity.abs() >= tolerance.velocity || position.outOfRange) {
+      return BouncingScrollSimulation(
         spring: spring,
         position: position.pixels,
-        velocity: mVelocity,
-        leadingExtent: position.minScrollExtent - headerNotifier.overExtent,
-        trailingExtent: position.maxScrollExtent + footerNotifier.overExtent,
+        velocity: velocity * 0.91,
+        // TODO(abarth): We should move this constant closer to the drag end.
+        leadingExtent: position.minScrollExtent,
+        trailingExtent: position.maxScrollExtent,
         tolerance: tolerance,
       );
     }
-    _headerSimulationCreationState.value = hState;
-    _footerSimulationCreationState.value = fState;
-    return simulation;
+    return null;
   }
+
+  // The ballistic simulation here decelerates more slowly than the one for
+  // ClampingScrollPhysics so we require a more deliberate input gesture
+  // to trigger a fling.
+  @override
+  double get minFlingVelocity => kMinFlingVelocity * 2.0;
+
+  // Methodology:
+  // 1- Use https://github.com/flutter/scroll_overlay to test with Flutter and
+  //    platform scroll views superimposed.
+  // 2- Record incoming speed and make rapid flings in the test app.
+  // 3- If the scrollables stopped overlapping at any moment, adjust the desired
+  //    output value of this function at that input speed.
+  // 4- Feed new input/output set into a power curve fitter. Change function
+  //    and repeat from 2.
+  // 5- Repeat from 2 with medium and slow flings.
+  /// Momentum build-up function that mimics iOS's scroll speed increase with repeated flings.
+  ///
+  /// The velocity of the last fling is not an important factor. Existing speed
+  /// and (related) time since last fling are factors for the velocity transfer
+  /// calculations.
+  @override
+  double carriedMomentum(double existingVelocity) {
+    return existingVelocity.sign *
+        math.min(0.000816 * math.pow(existingVelocity.abs(), 1.967).toDouble(),
+            40000.0);
+  }
+
+  // Eyeballed from observation to counter the effect of an unintended scroll
+  // from the natural motion of lifting the finger after a scroll.
+  @override
+  double get dragStartDistanceMotionThreshold => 3.5;
 }
 
-/// The state of the indicator when the BallisticSimulation is created.
-/// Used to determine whether BallisticSimulation needs to be created.
-class _BallisticSimulationCreationState {
-  final IndicatorMode mode;
-  final double offset;
+/// 回弹设置
+class BouncingSettings {
+  bool top;
+  bool bottom;
 
-  const _BallisticSimulationCreationState({
-    required this.mode,
-    required this.offset,
+  BouncingSettings({
+    this.top = true,
+    this.bottom = true,
   });
 
-  bool needCreation(_BallisticSimulationCreationState newState) {
-    return mode != newState.mode || offset != newState.offset;
+  BouncingSettings copy({
+    bool? top,
+    bool? bottom,
+  }) {
+    return BouncingSettings(
+      top: top ?? this.top,
+      bottom: bottom ?? this.bottom,
+    );
   }
-}
-
-/// ScrollMetrics extension.
-extension _ScrollMetricsExtension on ScrollMetrics {
-  // NestedScrollView outer.
-  bool get isNestedOuter =>
-      this is ScrollPosition && (this as ScrollPosition).debugLabel == 'outer';
-
-  // NestedScrollView inner.
-  bool get isNestedInner =>
-      this is ScrollPosition && (this as ScrollPosition).debugLabel == 'inner';
 }

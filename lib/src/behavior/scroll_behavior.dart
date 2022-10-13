@@ -1,29 +1,11 @@
-part of easy_refresh;
+import 'package:flutter/material.dart';
 
-/// Define [ScrollBehavior] in the scope of EasyRefresh.
-/// Add support for web and PC.
-class ERScrollBehavior extends ScrollBehavior {
-  final ScrollPhysics? _physics;
-
-  const ERScrollBehavior([this._physics]);
-
-  @override
-  ScrollPhysics getScrollPhysics(BuildContext context) {
-    return _physics ?? super.getScrollPhysics(context);
-  }
+class EmptyOverScrollScrollBehavior extends ScrollBehavior {
+  const EmptyOverScrollScrollBehavior();
 
   @override
   Widget buildViewportChrome(
       BuildContext context, Widget child, AxisDirection axisDirection) {
     return child;
   }
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => <PointerDeviceKind>{
-        PointerDeviceKind.touch,
-        PointerDeviceKind.stylus,
-        PointerDeviceKind.invertedStylus,
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.unknown,
-      };
 }
